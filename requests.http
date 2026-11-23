@@ -1,15 +1,70 @@
-### Book an appointment
+### 1. Book tomorrow (for stats)
+# @name bookTomorrow
 POST http://localhost:3000/api/appointments
 Content-Type: application/json
 
-{"patient_id": 1, "doctor_id": 2, "appt_datetime": "2027-01-20 10:00"}
-### Cancel appointment 18
-PATCH http://localhost:3000/api/appointments/18/cancel
-### Doctor stats
-GET http://localhost:3000/api/doctors/1/stats
+{"patient_id": 1, "doctor_id": 2, "appt_datetime": "{{$localDatetime "YYYY-MM-DD" 1 d}} 09:00"}
 
-### Doctors report
+### 2. Book in two days (for stats)
+POST http://localhost:3000/api/appointments
+Content-Type: application/json
+
+{"patient_id": 2, "doctor_id": 2, "appt_datetime": "{{$localDatetime "YYYY-MM-DD" 2 d}} 11:00"}
+
+### 3. Invalid: not on a 30-minute boundary
+POST http://localhost:3000/api/appointments
+Content-Type: application/json
+
+{"patient_id": 1, "doctor_id": 2, "appt_datetime": "{{$localDatetime "YYYY-MM-DD" 3 d}} 09:15"}
+
+### 4. Invalid: in the past
+POST http://localhost:3000/api/appointments
+Content-Type: application/json
+
+{"patient_id": 1, "doctor_id": 2, "appt_datetime": "2025-01-10 10:00"}
+
+### 5. Doctor stats
+GET http://localhost:3000/api/doctors/2/stats
+
+### 6. Book 5 days ahead (to cancel with full refund)
+# @name bookFar
+POST http://localhost:3000/api/appointments
+Content-Type: application/json
+
+{"patient_id": 2, "doctor_id": 3, "appt_datetime": "{{$localDatetime "YYYY-MM-DD" 5 d}} 10:00"}
+
+### 7. Cancel it (more than 48h, so 100%)
+PATCH http://localhost:3000/api/appointments/{{bookFar.response.body.$.id}}/cancel
+
+### 8. Cancel tomorrow's booking (short notice)
+PATCH http://localhost:3000/api/appointments/{{bookTomorrow.response.body.$.id}}/cancel
+
+### 9. Cancel again (already cancelled, so 409)
+PATCH http://localhost:3000/api/appointments/{{bookFar.response.body.$.id}}/cancel
+
+### 10. Fill Dr. Boateng's busy day (12th booking)
+POST http://localhost:3000/api/appointments
+Content-Type: application/json
+
+{"patient_id": 3, "doctor_id": 1, "appt_datetime": "2027-01-11 16:30"}
+
+### 11. 13th booking (day full, waitlist offered)
+POST http://localhost:3000/api/appointments
+Content-Type: application/json
+
+{"patient_id": 4, "doctor_id": 1, "appt_datetime": "2027-01-11 16:00"}
+
+### 12. Join the waitlist
+POST http://localhost:3000/api/waitlist
+Content-Type: application/json
+
+{"patient_id": 4, "doctor_id": 1, "date": "2027-01-11"}
+
+### 13. Cancel one of Dr. Boateng's appointments (frees a slot)
+PATCH http://localhost:3000/api/appointments/1/cancel
+
+### 14. Doctors report
 GET http://localhost:3000/api/reports/doctors
 
-### Busy days report
+### 15. Busy days report
 GET http://localhost:3000/api/reports/busy-days
