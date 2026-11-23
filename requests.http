@@ -1,0 +1,15 @@
+### Book an appointment
+POST http://localhost:3000/api/appointments
+Content-Type: application/json
+
+{"patient_id": 1, "doctor_id": 2, "appt_datetime": "2027-01-20 10:00"}
+### Cancel appointment 18
+PATCH http://localhost:3000/api/appointments/18/cancel
+### Doctor stats
+GET http://localhost:3000/api/doctors/1/stats
+
+### Doctors report
+GET http://localhost:3000/api/reports/doctors
+
+### Busy days report
+GET http://localhost:3000/api/reports/busy-days

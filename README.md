@@ -1,3 +1,83 @@
+# My Implementation
+
+MediBook clinic appointment API: Node.js + Express, MySQL 8 (raw parameterized `mysql2` queries, no ORM), Redis + BullMQ.
+
+## Prerequisites
+
+- Node.js 20+ and npm
+- MySQL 8 (CHECK constraints and window functions/CTEs are required)
+- Redis (on Windows, use [Memurai](https://www.memurai.com/) or WSL)
+
+## Setup
+
+1. Copy `.env.example` to `.env` and fill in your MySQL/Redis settings (`DB_*`, `REDIS_*`, `PORT`).
+2. Create the schema, then the sample data:
+   ```
+   mysql -u root -p < database/schema.sql
+   mysql -u root -p < database/seed.sql
+   ```
+   `schema.sql` drops and recreates the `medibook` database.
+3. `npm install`
+4. `npm start` (API on `PORT`, default 3000)
+5. In a second terminal: `npm run worker` (waitlist promotion + confirmation jobs)
+6. `npm test` (unit tests only; they need no MySQL or Redis)
+
+## Endpoints
+
+| Method | Path | Purpose | Success |
+|---|---|---|---|
+| GET | `/api/patients` | List patients | 200 |
+| POST | `/api/patients` | Create patient | 201 |
+| GET | `/api/patients/:id` | Get patient | 200 |
+| PUT | `/api/patients/:id` | Update patient | 200 |
+| DELETE | `/api/patients/:id` | Delete patient (409 if it has appointments) | 204 |
+| GET | `/api/doctors` | List doctors | 200 |
+| POST | `/api/doctors` | Create doctor | 201 |
+| GET | `/api/doctors/:id` | Get doctor | 200 |
+| PUT | `/api/doctors/:id` | Update doctor | 200 |
+| DELETE | `/api/doctors/:id` | Delete doctor (409 if it has appointments) | 204 |
+| GET | `/api/doctors/:id/stats` | Revenue, upcoming count, next-7-day counts, utilization % | 200 |
+| POST | `/api/appointments` | Book (`patient_id`, `doctor_id`, `appt_datetime`) | 201 |
+| PATCH | `/api/appointments/:id/cancel` | Cancel; response includes refund percent and amount | 200 |
+| POST | `/api/waitlist` | Join waitlist (`patient_id`, `doctor_id`, `date`) | 201 |
+| GET | `/api/reports/doctors` | Per-doctor appointments and revenue (incl. zero) | 200 |
+| GET | `/api/reports/busy-days` | Doctor-days over 80% of the 12-slot cap | 200 |
+| GET | `/feedback?lang=fr` | Localized feedback form (default `en`) | 200 |
+| POST | `/feedback` | Localized thank-you page (answers not stored) | 200 |
+
+Errors: `400` validation, `404` not found, `409` conflict (slot taken, day full, duplicate), `422` rule violation (past or out-of-hours slot).
+
+## Justifications
+
+### Part C — Appointments
+
+**Concurrency.** Booking runs in one transaction that first locks the doctor row (`SELECT ... FOR UPDATE`). Concurrent bookings for the same doctor are serialized, so the "count today's bookings, then insert" check cannot be raced past the 12-per-day cap. Slot uniqueness is enforced by the database, not by application code: the `uq_doctor_slot` unique key on `(doctor_id, appt_datetime, active_slot)`. If two requests arrive at the same instant, one insert fails with `ER_DUP_ENTRY` and becomes a `409`.
+
+**Refund boundaries.** Notice is measured from the cancellation time to the appointment time:
+- more than 48 hours: 100%
+- 24 hours up to and including 48 hours: 50% (so exactly 48h = 50%, exactly 24h = 50%)
+- less than 24 hours: 0%
+
+The tiers live in `src/config/constants.js`, and `calculateRefund` is a pure function covered by boundary tests. The cancellation and its refund amount are written in a single UPDATE inside a transaction on a locked row, so they succeed or fail together.
+
+**Cancelled slots.** Cancelled rows are kept for refund history, but their slot must be bookable again. `active_slot` is a stored generated column: `1` while `status = 'booked'`, `NULL` once cancelled. MySQL unique indexes ignore rows with `NULL`, so cancelled rows never collide with a new booking, while two booked rows for the same doctor and time still do.
+
+**Revenue.** Revenue collected = `SUM(amount_paid - COALESCE(refund_amount, 0))` over all of a doctor's appointments. Booked appointments count in full; a cancelled one counts only the part not refunded. Both the doctor stats and the doctors report use this definition, computed in SQL (`LEFT JOIN`, so doctors with no appointments show 0).
+
+### Part D — Audit log
+
+`src/utils/auditLog.js` appends one JSON line (`timestamp`, `event`, data) to `logs/audit.log` with `fs/promises`, so nothing blocks the event loop. It runs `mkdir(logs, { recursive: true })` before each write, so the directory is created on first use. The whole function is wrapped in `try/catch`: a failure is only printed to the console and never thrown, so logging can't fail a booking or cancellation. `logs/` is git-ignored.
+
+### Part E — Waitlist
+
+When a booking is refused because the slot is taken or the day is full, the `409` response includes a waitlist offer. `POST /api/waitlist` pushes the patient onto a Redis list keyed by doctor and date (`waitlist:<doctor>:<date>`); duplicates are rejected. Cancelling enqueues a `slot-freed` BullMQ job, which the separate worker handles. The worker moves the first patient atomically (`LMOVE`) from the waitlist into a `waitlist:processing:...` list, then books them through the same `bookAppointment` service the API uses.
+
+**If the promoted booking fails** (slot retaken, patient deleted, any error), the worker puts the patient back at the head of the waitlist and writes a `waitlist.promotion_failed` audit entry. On success, the patient is removed from the processing list. If the worker crashes mid-promotion, the patient is still in the processing list, and `recoverProcessing()` moves them back to the waitlist at worker startup. A patient is therefore always in the waitlist, the processing list, or the appointments table.
+
+Every confirmed booking also enqueues a `confirmation` job; the worker writes the message to the audit log.
+
+---
+
 # Final Assessment — Backend Development
 
 **Weight:** 30% of final grade
