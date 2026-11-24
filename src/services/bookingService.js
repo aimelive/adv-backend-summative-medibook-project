@@ -45,7 +45,9 @@ async function bookAppointment({ patientId, doctorId, apptDatetime }) {
   }
   if (result.error) {
     const [status, message] = BOOK_ERRORS[result.error];
-    throw new HttpError(status, message, status === 409 ? waitlistOffer : undefined);
+    const err = new HttpError(status, message, status === 409 ? waitlistOffer : undefined);
+    err.bookError = result.error;
+    throw err;
   }
   const { appointment } = result;
 

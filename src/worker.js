@@ -5,37 +5,11 @@ const pool = require('./config/db');
 const { QUEUE_NAME, queue } = require('./queues');
 const waitlist = require('./services/waitlistService');
 const { bookAppointment } = require('./services/bookingService');
+const { createSlotFreedHandler } = require('./services/promotionService');
 const patientModel = require('./models/patientModel');
 const { auditLog } = require('./utils/auditLog');
 
-// Local 'YYYY-MM-DD' from an appt_datetime string ('YYYY-MM-DD HH:MM:SS').
-const datePart = (dt) => String(dt).slice(0, 10);
-
-async function handleSlotFreed({ doctor_id: doctorId, appt_datetime: apptDatetime }) {
-  const date = datePart(apptDatetime);
-  const patientId = await waitlist.takeNext(doctorId, date);
-  if (patientId === null) return { promoted: false };
-
-  try {
-    const appointment = await bookAppointment({ patientId, doctorId, apptDatetime });
-    await waitlist.complete(doctorId, date, patientId);
-    await auditLog('waitlist.promoted', {
-      patient_id: patientId,
-      doctor_id: doctorId,
-      appointment_id: appointment.id,
-    });
-    return { promoted: true, appointment_id: appointment.id };
-  } catch (err) {
-    await waitlist.restore(doctorId, date, patientId);
-    await auditLog('waitlist.promotion_failed', {
-      patient_id: patientId,
-      doctor_id: doctorId,
-      appt_datetime: apptDatetime,
-      reason: err.message,
-    });
-    return { promoted: false, reason: err.message };
-  }
-}
+const handleSlotFreed = createSlotFreedHandler({ waitlist, bookAppointment, auditLog });
 
 async function handleConfirmation(data) {
   const patient = await patientModel.findById(data.patient_id);
