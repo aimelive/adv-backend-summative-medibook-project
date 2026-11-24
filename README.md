@@ -2,6 +2,8 @@
 
 MediBook clinic appointment API: Node.js + Express, MySQL 8 (raw parameterized `mysql2` queries, no ORM), Redis + BullMQ.
 
+Video Demo Walthrough: https://youtu.be/i0FIfM0b4K0
+
 ## Prerequisites
 
 - Node.js 20+ and npm
